@@ -1,0 +1,448 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+from Crypto.Cipher import AES
+import random
+import hashlib
+import json
+import exceptions
+import getpass
+import os
+import sys
+import base64
+import getopt
+
+class HisManager:
+
+    cipher = None
+    workingDir = None
+    dataFile = None
+
+    def __init__(self, wd):
+
+        self.cipher = None
+        self.workingDir = wd
+
+        wd = self.wd()
+        self.dataFile = os.path.join(wd, "data.bin")
+
+    def needCipher(self):
+        return self.cipher == None
+
+    def setCipher(self, cipher):
+        self.cipher = cipher
+
+    def loadData(self):
+        if os.path.exists(self.dataFile) == False:
+            return {}
+
+        with open(self.dataFile, "rb") as fp:
+            data = fp.read()
+
+        data = self.cipher.dec(data)
+        data = json.loads(data)
+        return data
+
+    def isSKeyCorrect(self, skey):
+
+        try:
+
+            objHisCipher = HisCipher(skey)
+            self.setCipher(objHisCipher)
+            self.loadData()
+            return True
+
+        except exceptions.ValueError:
+
+            self.setCipher(None)
+            return False
+
+    def hasPassword(self):
+        return os.path.exists(self.dataFile)
+
+    def savePassword(self, skey):
+
+        objHisCipher = HisCipher(skey)
+        self.setCipher(objHisCipher)
+        data = self.loadData()
+
+        enc_data = self.cipher.enc(json.dumps(data))
+        with open(self.dataFile, "wb") as fp:
+            fp.write(enc_data);
+
+         
+    def addItem(self, title, username, password, group): 
+        data = self.loadData()
+
+        new_item = {'title':title, 'username':username, 'password':password};
+
+        if group not in data:
+            data[group] = []
+
+        data[group].append(new_item)
+        data = json.dumps(data)
+
+        enc_data = self.cipher.enc(data)
+
+        with open(self.dataFile, "wb") as fp:
+            fp.write(enc_data);
+
+
+    def getGroups(self):
+        data = self.loadData()
+        groups = data.keys()
+        new_groups = []
+        for g in groups:
+            new_groups.append(g)
+        return new_groups
+
+    def getByGroup(self, group):
+        data = self.loadData()
+
+        if group in data:
+            group_data = data[group]
+        else:
+            group_data = []
+
+        return group_data
+            
+    def wd(self):
+        wd = os.path.expanduser(self.workingDir)
+        if os.path.exists(wd) == False:
+            print "* Creating " + wd
+            os.mkdir(wd, 0700)
+            print "* Done"
+        return wd
+    
+        
+
+class HisCipher:
+    def __init__(self, skey):
+        self.blocksize = 32
+        self.skey = skey
+        self.skey = self.digest(self.skey)
+        self.skey = self.pad(self.skey)
+
+    def pad(self, s):
+        if len(s) % self.blocksize == 0:
+            return s
+        else:
+            return s+(self.blocksize-len(s)%self.blocksize)*" "
+
+    def enc(self, plain):
+        plain = self.pad(plain)
+        #No need to do random IV as we have only one message to encrypt
+        IV = AES.block_size * '\x00'
+        c = AES.new(self.skey, AES.MODE_CBC, IV);
+        return base64.b64encode(c.encrypt(plain));
+
+    def dec(self, encrypted):
+        encrypted = base64.b64decode(encrypted);
+        IV = AES.block_size * '\x00'
+        c = AES.new(self.skey, AES.MODE_CBC, IV);
+        plain = c.decrypt(encrypted);
+        plain = plain.rstrip();
+        return plain;
+
+    def digest(self, str):
+        return hashlib.sha256(str).digest()
+
+    @staticmethod
+    def gen(length, upper=True, lower=True, numeric=True, special=False):
+        str = ""
+        choice = []
+
+        if upper:
+            #A-Z
+            choice = choice + map(chr, range(65, 91))
+
+        if lower:
+            #a-z
+            choice = choice + map(chr, range(97, 123))
+
+        if numeric:
+            #0-9
+            choice = choice + map(chr, range(48, 58))
+
+        if special:
+            choice = choice + ["~", "!", "@", "#", "$", "%", "^",\
+                                "&", "*","(", ")", "-", "_", "+",\
+                                "=", "[", "]", "|", "{", "}", ";",\
+                                "\"", "'", ":", "<", ">", ",", ".", "?"]
+
+        for i in range(length):
+            str += random.choice(choice)
+
+        return str 
+
+
+
+def input_not_empty(msg, get_input_func):
+    while True:
+        try:
+            val = get_input_func(msg);
+            val = val.decode(io_encoding)
+        except exceptions.EOFError:
+            sys.exit()
+
+        val = val.strip()
+        if val != u"":
+            break
+
+    return val
+
+
+def raw_input_not_empty(msg = ""):
+    return input_not_empty(msg, raw_input)
+
+def pass_input_not_empty(msg=""):
+    return input_not_empty(msg, getpass.getpass)
+
+
+def ask_for_skey_if_needed(objHisManager):
+    if objHisManager.needCipher():
+        while True:
+            if objHisManager.hasPassword() == False:
+                skey  = pass_input_not_empty(
+                            "Please Enter Your New Master Password: ")
+                skey2 = pass_input_not_empty("Again: ")
+                if skey2 != skey:
+                    print "Error: Passwords not matched, Please try again."
+                else:
+                    objHisManager.savePassword(skey)
+                    break
+            else:
+                skey = pass_input_not_empty("Please Enter Master Password: ")
+                if objHisManager.isSKeyCorrect(skey):
+                    break
+                else:
+                    print "Error: Incorrect Master Password"
+                    
+        objHisCipher = HisCipher(skey)
+        objHisManager.setCipher(objHisCipher)
+
+def cmd_help(objHisManager):
+    wd = objHisManager.workingDir
+    print "* options: his -d " + wd + " -e " + io_encoding
+    print "add            - Generate a password record"
+    print "gen            - Generate a password without saving it"
+    print "gen <n>        - Generate n-len password"
+    print "gen <n> <luns> - l lowercase, u uppercase, n numbers, s special chars"
+    print "g              - list groups"
+    print "Ctrl-D         - exit"
+    print "Type anything else to search"
+
+def cmd_gen(len=12, upper=True, lower=True, numeric=True, special=False):
+    print HisCipher.gen(len, upper, lower, numeric, special);
+
+
+def cmd_add(objHisManager, password=""):
+    ask_for_skey_if_needed(objHisManager)
+    title = raw_input_not_empty("URL or Title: ");
+    username = raw_input_not_empty("Username: ");
+
+    if password == "": 
+        while True:
+            answer=raw_input_not_empty("[g]enerate OR [e]nter: ");
+            if answer == "g" or answer == "e":
+                break
+    
+        if answer == "g":
+            password = HisCipher.gen(12);
+            str_title = title.encode(io_encoding) 
+            print "Your password for " + str_title + " is "+password
+        else:
+            password = raw_input_not_empty("Password: ");
+    
+    groups = objHisManager.getGroups()
+    if len(groups) > 0:
+        n = 0
+        g_msg = "Group: Select "
+        for g in groups:
+            g_msg += "[" + str(n) + "] " + g.encode(io_encoding) + ", "
+            n=n+1
+        g_msg += " Or Enter a Name: "
+    else:
+        g_msg = "New Group Name: "
+
+    group = raw_input_not_empty(g_msg)
+    if len(groups) > 0:
+        try:
+            group_n = int(group)
+            if len(groups)>group_n:
+                group = groups[group_n]
+        except exceptions.ValueError:
+            group_n = -1
+
+        
+    objHisManager.addItem(title, username, password, group)
+
+def cmd_search(objHisManager, kw):
+
+    if kw == u"":
+        return
+
+    kw = kw.lower()
+
+    ask_for_skey_if_needed(objHisManager)
+    data = objHisManager.loadData()
+    matched_items = []
+
+
+    for g in data:
+        if kw in g.lower():
+            g_matched = True
+        else:
+            g_matched = False
+
+        items = data[g]
+
+        for item in items:
+
+            item_matched = False
+
+            if g_matched:
+                item_matched = True
+            else:
+                if kw in item["title"].lower() or kw in item["username"].lower():
+                    item_matched = True
+
+            if item_matched:
+                item[u'group'] = g
+                matched_items.append(item)
+
+    
+    n = 0
+
+    for item in matched_items:
+
+        item['group'] = item['group'].encode(io_encoding)
+        item['title'] = item['title'].encode(io_encoding)
+        item['username'] = item['username'].encode(io_encoding)
+        item['password'] = item['password'].encode(io_encoding)
+
+        print "[" + str(n) + "]" + item['group'] + " - " + item['title'] + \
+                ' - '+item['username']+' / '+item['password']
+        n = n+1
+
+def cmd_groups(objHisManager):
+    ask_for_skey_if_needed(objHisManager)
+    n = 0
+    for g in objHisManager.getGroups():
+        print "[" + str(n) + "]" + g.encode(io_encoding)
+        n += 1
+
+def user_input(objHisManager):
+
+    MAX_PASSWORD_LEN = 120
+    DEFAULT_PASSWORD_LEN = 12
+
+    input = raw_input("> ")
+    input = input.decode(io_encoding)
+
+    input  = input.strip()
+    inputs = input.split(" ")
+    cmd    = inputs[0].strip()
+
+    if cmd == "help":
+        cmd_help(objHisManager)
+
+    elif cmd == "gen":
+        if len(inputs) > 1:
+            keylen = inputs[1].strip()
+        else:
+            keylen = ""
+        try:
+            keylen = int(keylen)
+        except exceptions.ValueError:
+            if len(inputs) > 1:
+                print "* Warning: The 2nd parameter must be integer. " + \
+                        "Resetting to default value: " + str(DEFAULT_PASSWORD_LEN)
+
+            keylen = DEFAULT_PASSWORD_LEN
+
+        if keylen > MAX_PASSWORD_LEN:
+            print "* Warning: Exceeded the max length." + \
+                    "Resetting to max value: " + str(MAX_PASSWORD_LEN)
+            keylen = MAX_PASSWORD_LEN
+
+        if keylen == 0:
+            keylen = DEFAULT_PASSWORD_LEN
+
+        numeric = upper = lower = True
+        special = False
+
+        if len(inputs) > 2:
+            mod = inputs[2].strip()
+            if "n" not in mod:
+                numeric = False
+            if "l" not in mod:
+                lower = False
+            if "u" not in mod:
+                upper = False
+            if "s" in mod:
+                special = True
+
+        cmd_gen(keylen, upper, lower, numeric, special)
+
+    elif cmd == "add":
+        cmd_add(objHisManager)
+    elif cmd == "g":
+        cmd_groups(objHisManager)
+    else:
+        while True:
+            try:
+                cmd_search(objHisManager, input)
+                break
+            except exceptions.UnicodeDecodeError as e:
+                objHisManager.setCipher(None)
+                print "!!Error: Incorrect Master Password!!"
+
+
+io_encoding = "UTF-8"
+
+def main():
+
+    global io_encoding
+
+    #default working dir
+    working_dir      = "~/.his"
+
+    opts, args = getopt.getopt(sys.argv[1:], 'd:e:') 
+    for o, a in opts:
+        if o == "-d":
+            working_dir = a
+        if o == "-e":
+            io_encoding = a
+
+    ctype = os.environ.get("LC_CTYPE")
+
+    if ctype == None:
+        print "* Warning: $LC_CTYPE is not set." + \
+                " The expecting value is " + io_encoding
+    elif ctype <> io_encoding:
+        print "* Warning: $LC_CTYPE is currently set as " + ctype + "." + \
+                " The expecting value is " + io_encoding
+
+
+    objHisManager = HisManager(working_dir)
+
+    print "Type \"help\" for commands. Ctrl-D to exit"
+    while True:
+        try:
+            user_input(objHisManager)
+        except exceptions.KeyboardInterrupt:
+            print "" 
+            continue
+        except exceptions.EOFError:
+            print ""
+            break
+        
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        print str(e)
+        sys.exit(1)
