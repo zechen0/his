@@ -8,7 +8,7 @@ Encrypted password data is stored locally.
 Install
 -------
 ```
-pip install pycrypto && curl https://raw.githubusercontent.com/chenze/his/master/his -o /usr/bin/his
+pip install pycrypto && curl https://raw.githubusercontent.com/zechenbit/his/master/his -o /usr/bin/his
 ```
 
 Command-line Options
@@ -37,16 +37,16 @@ Type anything else to search
 Please Enter Your New Master Password: 
 Again: 
 URL or Title: example.com
-Username: chen
+Username: zechen
 [g]enerate OR [e]nter: g
 Your password for example.com is RzL8uviB4M6p
 New Group Name: First Group
 > 
 
 > first
-[0]First Group - example.com - chen / RzL8uviB4M6p
+[0]First Group - example.com - zechen / RzL8uviB4M6p
 > exam
-[0]First Group - example.com - chen / RzL8uviB4M6p
+[0]First Group - example.com - zechen / RzL8uviB4M6p
 
 > g
 [0]First Group
